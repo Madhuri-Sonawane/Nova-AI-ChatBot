@@ -6,9 +6,9 @@ require("dotenv").config();
 const app = express();
 const PORT = 3001;
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-if (!GEMINI_API_KEY) {
-  console.error("❌ Missing GEMINI_API_KEY in .env file");
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+if (!GROQ_API_KEY) {
+  console.error("❌ Missing GROQ_API_KEY in .env file");
   process.exit(1);
 }
 
@@ -19,62 +19,39 @@ app.post("/api/messages", async (req, res) => {
   try {
     const { messages, system } = req.body;
 
-    // Convert messages to Gemini format
-    const contents = messages.map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [
-        {
-          text:
-            typeof m.content === "string"
-              ? m.content
-              : m.content
-                  .filter((c) => c.type === "text")
-                  .map((c) => c.text)
-                  .join("\n") || "[file attached]",
-        },
-      ],
+    const groqMessages = [];
+    if (system) groqMessages.push({ role: "system", content: system });
+    messages.forEach(m => groqMessages.push({
+      role: m.role,
+      content: typeof m.content === "string" ? m.content : m.displayText || ""
     }));
 
-    const body = {
-      contents,
-      generationConfig: {
-        maxOutputTokens: 1000,
-        temperature: 0.7,
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${GROQ_API_KEY}`,
       },
-    };
-
-    // Add system instruction if provided
-    if (system) {
-      body.systemInstruction = {
-        parts: [{ text: system }],
-      };
-    }
-
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      }
-    );
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        messages: groqMessages,
+        max_tokens: 1000,
+        temperature: 0.7,
+      }),
+    });
 
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("Gemini API error:", data);
+      console.error("Groq API error:", data);
       return res.status(response.status).json({
-        error: { message: data.error?.message || "Gemini API error" },
+        error: { message: data.error?.message || "Groq API error" },
       });
     }
 
-    // Convert Gemini response to Anthropic-style format
-    const text =
-      data.candidates?.[0]?.content?.parts?.[0]?.text || "No response.";
+    const text = data.choices?.[0]?.message?.content || "No response.";
+    res.json({ content: [{ type: "text", text }] });
 
-    res.json({
-      content: [{ type: "text", text }],
-    });
   } catch (err) {
     console.error("Proxy error:", err);
     res.status(500).json({ error: { message: err.message } });
@@ -83,5 +60,5 @@ app.post("/api/messages", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`✅ Nova proxy running at http://localhost:${PORT}`);
-  console.log(`🤖 Using Google Gemini (free tier)`);
+  console.log(`🤖 Using Groq - LLaMA 3.3 70B (free)`);
 });

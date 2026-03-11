@@ -32,15 +32,14 @@ function readAsText(file) {
 
 // ── Main Component ─────────────────────────────────────────
 export default function App() {
-  const [sessions, setSessions]     = useState([{ id: 1, title: "New chat", messages: [] }]);
-  const [activeId, setActiveId]     = useState(1);
-  const [input, setInput]           = useState("");
-  const [loading, setLoading]       = useState(false);
-  const [persona, setPersona]       = useState(DEFAULT_PERSONA);
-  const [webSearch, setWebSearch]   = useState(true);
-  const [sidebarOpen, setSidebar]   = useState(true);
-  const [pendingFiles, setFiles]    = useState([]);
-  const [error, setError]           = useState(null);
+  const [sessions, setSessions]   = useState([{ id: 1, title: "New chat", messages: [] }]);
+  const [activeId, setActiveId]   = useState(1);
+  const [input, setInput]         = useState("");
+  const [loading, setLoading]     = useState(false);
+  const [persona, setPersona]     = useState(DEFAULT_PERSONA);
+  const [sidebarOpen, setSidebar] = useState(true);
+  const [pendingFiles, setFiles]  = useState([]);
+  const [error, setError]         = useState(null);
 
   const bottomRef    = useRef(null);
   const fileInputRef = useRef(null);
@@ -85,21 +84,14 @@ export default function App() {
 
   const removeFile = (name) => setFiles(prev => prev.filter(f => f.name !== name));
 
-  // ── Build API content ──
-  const buildContent = (text, files) => {
-    if (!files.length) return text;
-    const parts = [];
-    for (const f of files) {
-      if (f.isImage) {
-        parts.push({ type: "image", source: { type: "base64", media_type: f.type, data: f.data } });
-      } else if (f.isPdf) {
-        parts.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: f.data } });
-      } else {
-        parts.push({ type: "text", text: `[File: ${f.name}]\n\`\`\`\n${f.data}\n\`\`\`` });
-      }
+  // ── Build message content (text only for Gemini) ──
+  const buildDisplayText = (text, files) => {
+    let result = text || "";
+    if (files.length > 0) {
+      const fileNames = files.map(f => f.name).join(", ");
+      result = result ? `${result}\n[Files: ${fileNames}]` : `[Files: ${fileNames}]`;
     }
-    if (text.trim()) parts.push({ type: "text", text });
-    return parts;
+    return result;
   };
 
   // ── Send message ──
@@ -107,10 +99,10 @@ export default function App() {
     if (!text.trim() && !pendingFiles.length) return;
     setError(null);
 
-    const content = buildContent(text, pendingFiles);
+    const displayText = buildDisplayText(text, pendingFiles);
     const userMsg = {
       role: "user",
-      content,
+      content: displayText,
       displayText: text,
       files: pendingFiles.map(f => f.name),
     };
@@ -126,24 +118,20 @@ export default function App() {
     setFiles([]);
     setLoading(true);
 
-    const apiMessages = updated.map(m => ({ role: m.role, content: m.content }));
+    // Send only role + content (string) to proxy
+    const apiMessages = updated.map(m => ({
+      role: m.role,
+      content: typeof m.content === "string" ? m.content : m.displayText || "",
+    }));
 
     try {
-      const body = {
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1000,
-        system: persona,
-        messages: apiMessages,
-      };
-
-      if (webSearch) {
-        body.tools = [{ type: "web_search_20250305", name: "web_search" }];
-      }
-
-      const res  = await fetch("http://localhost:3001/api/messages", {
+      const res = await fetch("http://localhost:3001/api/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          messages: apiMessages,
+          system: persona,
+        }),
       });
 
       const data = await res.json();
@@ -178,7 +166,7 @@ export default function App() {
     e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px";
   };
 
-  // ── Render ──────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────
   return (
     <div className="app">
 
@@ -205,22 +193,6 @@ export default function App() {
               rows={4}
               placeholder="Describe how Nova should behave…"
             />
-          </div>
-
-          {/* Features */}
-          <div className="sidebar-section">
-            <div className="section-label">Features</div>
-            <div className="toggle-row">
-              <div className="toggle-info">
-                <span className="toggle-name">🔍 Web Search</span>
-                <span className="toggle-desc">Browse the internet live</span>
-              </div>
-              <button
-                className={`toggle ${webSearch ? "on" : ""}`}
-                onClick={() => setWebSearch(v => !v)}
-                aria-label="Toggle web search"
-              />
-            </div>
           </div>
 
           {/* History */}
@@ -262,14 +234,12 @@ export default function App() {
             </div>
             <div>
               <div className="chat-title">Nova AI</div>
-              <div className="chat-sub">General-purpose assistant</div>
+              <div className="chat-sub">Powered by Gemini</div>
             </div>
           </div>
 
           <div className="header-badges">
-            {webSearch && (
-              <span className="badge badge-search">🔍 Search ON</span>
-            )}
+            <span className="badge badge-search">🤖 Gemini</span>
             {pendingFiles.length > 0 && (
               <span className="badge badge-file">
                 📎 {pendingFiles.length} file{pendingFiles.length > 1 ? "s" : ""}
@@ -284,7 +254,7 @@ export default function App() {
             <div className="welcome-orb">✦</div>
             <h1 className="welcome-title">Hello, I'm <span>Nova</span></h1>
             <p className="welcome-sub">
-              Your all-purpose AI assistant. Ask me anything, upload files, or let me search the web for you.
+              Your all-purpose AI assistant powered by Gemini. Ask me anything, upload files, or brainstorm ideas.
             </p>
             <div className="suggestions-grid">
               {SUGGESTIONS.map(s => (
@@ -328,9 +298,7 @@ export default function App() {
             )}
 
             {error && (
-              <div className="error-box">
-                ⚠️ {error}
-              </div>
+              <div className="error-box">⚠️ {error}</div>
             )}
 
             <div ref={bottomRef} />
@@ -371,7 +339,7 @@ export default function App() {
                 type="file"
                 multiple
                 hidden
-                accept="image/*,.pdf,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css"
+                accept=".txt,.md,.csv,.json,.js,.ts,.py,.html,.css"
                 onChange={handleFileAdd}
               />
               <button
@@ -384,7 +352,7 @@ export default function App() {
           </div>
 
           <p className="input-hint">
-            Enter to send · Shift+Enter for new line · Attach images, PDFs, or text files
+            Enter to send · Shift+Enter for new line · Attach text files
           </p>
         </div>
 
